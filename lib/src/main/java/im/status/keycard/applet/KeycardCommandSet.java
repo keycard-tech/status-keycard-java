@@ -777,13 +777,13 @@ public class KeycardCommandSet {
       }
 
       int toSend = ndef.length;
-      int off = 0;
+      short off = 0;
       APDUResponse resp = null;
 
       while (toSend > 0) {
         int chunkSize = Math.min(NDEF_MAX_CHUNK_SIZE, toSend);
         
-        resp = storeData(Arrays.copyOfRange(ndef, off, off+chunkSize), STORE_DATA_P1_NDEF);
+        resp = storeData(Arrays.copyOfRange(ndef, off, off+chunkSize), STORE_DATA_P1_NDEF, off);
 
         if (resp.getSw() != 0x9000) {
           break;
