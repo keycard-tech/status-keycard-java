@@ -40,8 +40,7 @@ public class BIP32KeyPair {
   }
 
   /**
-   * Constructs a BIP32 keypair from a KEY TEMPLATE TLV. If the data is the output of the EXPORT KEY command, it will
-   * never contain the chain code field and could contain only the public key.
+   * Constructs a BIP32 keypair from a KEY TEMPLATE TLV. Data can be the output of the EXPORT KEY command.
    *
    * @param tlvData the TLV data
    * @return the BIP32 keypair
@@ -78,17 +77,13 @@ public class BIP32KeyPair {
 
   /**
    * Low level constructor. If the private key is not null, the public key can be omitted and it will be calculated
-   * automatically. If the private key is null the chain code must be null and the public key must be not null.
+   * automatically.
    *
    * @param privateKey the private key
    * @param chainCode the chain code
    * @param publicKey the public key
    */
-  public BIP32KeyPair(byte[] privateKey, byte[] chainCode, byte[] publicKey) {
-    if (privateKey == null && (chainCode != null || publicKey == null))  {
-      throw new IllegalArgumentException("Private key can be null only if the public key is not null and the chain code is null");
-    }
-    
+  public BIP32KeyPair(byte[] privateKey, byte[] chainCode, byte[] publicKey) {    
     this.privateKey = privateKey;
     this.chainCode = chainCode;
     
