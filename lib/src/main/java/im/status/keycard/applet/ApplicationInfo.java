@@ -84,7 +84,7 @@ public class ApplicationInfo {
    * @return true if the card has a master key, false otherwise
    */
   public boolean hasMasterKey() {
-    return keyUID.length != 0;
+    return (keyUID != null) && (keyUID.length != 0);
   }
 
   /**
