@@ -85,6 +85,8 @@ public class KeycardCommandSet {
   static final byte FACTORY_RESET_P1_MAGIC = (byte) 0xAA;
   static final byte FACTORY_RESET_P2_MAGIC = 0x55;
 
+  static final int NDEF_MAX_CHUNK_SIZE = 220;
+
   static final byte TLV_APPLICATION_INFO_TEMPLATE = (byte) 0xA4;
 
   private final CardChannel apduChannel;
@@ -774,7 +776,24 @@ public class KeycardCommandSet {
         ndef = tmp;
       }
 
-      return storeData(ndef, STORE_DATA_P1_NDEF);
+      int toSend = ndef.length;
+      short off = 0;
+      APDUResponse resp = null;
+
+      while (toSend > 0) {
+        int chunkSize = Math.min(NDEF_MAX_CHUNK_SIZE, toSend);
+        
+        resp = storeData(Arrays.copyOfRange(ndef, off, off+chunkSize), STORE_DATA_P1_NDEF, off);
+
+        if (resp.getSw() != 0x9000) {
+          break;
+        }
+
+        off += chunkSize;
+        toSend -= chunkSize;
+      }
+
+      return resp;
     } else {
       APDUCommand setNDEF = secureChannel.protectedCommand(0x80, INS_SET_NDEF, 0, 0, ndef);
       return secureChannel.transmit(apduChannel, setNDEF);
@@ -790,7 +809,20 @@ public class KeycardCommandSet {
    * @throws IOException communication error
    */
   public APDUResponse storeData(byte[] data, byte dataType) throws IOException {
-    APDUCommand storeData = secureChannel.protectedCommand(0x80, INS_STORE_DATA, dataType, 0, data);
+    return storeData(data, dataType, (short) 0);
+  }
+
+   /**
+   * Sends a STORE DATA APDU.
+   *
+   * @param data the data field of the APDU
+   * @param dataType the type of data to be stored
+   * @param off the offset, must be a multiple of 4. Only useful for NDEF data type. 
+   * @return the raw card response
+   * @throws IOException communication error
+   */
+  public APDUResponse storeData(byte[] data, byte dataType, short off) throws IOException {
+    APDUCommand storeData = secureChannel.protectedCommand(0x80, INS_STORE_DATA, dataType, (byte) (off / 4), data);
     return secureChannel.transmit(apduChannel, storeData);
   }
 
