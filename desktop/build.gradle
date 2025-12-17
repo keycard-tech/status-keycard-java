@@ -17,7 +17,6 @@ eclipse {
 
 dependencies {
     compile project(':lib')
-    compile 'org.hid4java:hid4java:0.5.0'
 }
 
 task sourcesJar(type: Jar, dependsOn: classes) {
