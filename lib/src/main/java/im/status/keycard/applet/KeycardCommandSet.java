@@ -51,11 +51,6 @@ public class KeycardCommandSet {
   public static final byte DERIVE_P1_SOURCE_PARENT = (byte) 0x40;
   public static final byte DERIVE_P1_SOURCE_CURRENT = (byte) 0x80;
 
-  static final byte DUPLICATE_KEY_P1_START = 0x00;
-  static final byte DUPLICATE_KEY_P1_ADD_ENTROPY = 0x01;
-  static final byte DUPLICATE_KEY_P1_EXPORT = 0x02;
-  static final byte DUPLICATE_KEY_P1_IMPORT = 0x03;
-
   static final byte SIGN_P1_CURRENT_KEY = 0x00;
   static final byte SIGN_P1_DERIVE = 0x01;
   static final byte SIGN_P1_DERIVE_AND_MAKE_CURRENT = 0x02;
@@ -86,6 +81,9 @@ public class KeycardCommandSet {
   static final byte FACTORY_RESET_P2_MAGIC = 0x55;
 
   static final int NDEF_MAX_CHUNK_SIZE = 220;
+  public static final byte PAIR_P2_ANY = 0x00;
+  public static final byte PAIR_P2_EPHEMERAL = 0x01;
+  public static final byte PAIR_P2_PERSISTENT = 0x02;
 
   static final byte TLV_APPLICATION_INFO_TEMPLATE = (byte) 0xA4;
 
@@ -188,9 +186,19 @@ public class KeycardCommandSet {
    * @throws APDUException pairing error
    */
   public void autoPair(String pairingPassword) throws IOException, APDUException {
+    autoPair(pairingPassword, PAIR_P2_ANY);
+  }
+
+  /**
+   * Automatically pairs. Derives the secret from the given password.
+   *
+   * @throws IOException communication error
+   * @throws APDUException pairing error
+   */
+  public void autoPair(String pairingPassword, byte pairingMode) throws IOException, APDUException {
     byte[] secret = pairingPasswordToSecret(pairingPassword);
 
-    secureChannel.autoPair(apduChannel, secret);
+    autoPair(secret, pairingMode);
   }
 
   /**
@@ -219,7 +227,17 @@ public class KeycardCommandSet {
    * @throws APDUException pairing error
    */
   public void autoPair(byte[] sharedSecret) throws IOException, APDUException {
-    secureChannel.autoPair(apduChannel, sharedSecret);
+    autoPair(sharedSecret, PAIR_P2_ANY);
+  }
+
+  /**
+   * Automatically pairs. Calls the corresponding method of the SecureChannel class.
+   *
+   * @throws IOException communication error
+   * @throws APDUException pairing error
+   */
+  public void autoPair(byte[] sharedSecret, byte pairingMode) throws IOException, APDUException {
+    secureChannel.autoPair(apduChannel, pairingMode, sharedSecret);
   }
 
   /**
@@ -257,7 +275,14 @@ public class KeycardCommandSet {
    * Sends a PAIR APDU. Calls the corresponding method of the SecureChannel class.
    */
   public APDUResponse pair(byte p1, byte[] data) throws IOException {
-    return secureChannel.pair(apduChannel, p1, data);
+    return pair(p1, PAIR_P2_ANY, data);
+  }
+
+  /**
+   * Sends a PAIR APDU. Calls the corresponding method of the SecureChannel class.
+   */
+  public APDUResponse pair(byte p1, byte p2, byte[] data) throws IOException {
+    return secureChannel.pair(apduChannel, p1, p2, data);
   }
 
   /**

@@ -34,7 +34,7 @@ public class SecureChannelSession {
 
   public static final byte PAIR_P1_FIRST_STEP = 0x00;
   public static final byte PAIR_P1_LAST_STEP = 0x01;
-  
+
   public static final int PAYLOAD_MAX_SIZE = 223;
 
   static final byte PAIRING_MAX_CLIENT_COUNT = 5;
@@ -170,10 +170,10 @@ public class SecureChannelSession {
    * @param apduChannel the apdu channel
    * @throws IOException communication error
    */
-  public void autoPair(CardChannel apduChannel, byte[] sharedSecret) throws IOException, APDUException {
+  public void autoPair(CardChannel apduChannel, byte pairingMode, byte[] sharedSecret) throws IOException, APDUException {
     byte[] challenge = new byte[32];
     random.nextBytes(challenge);
-    APDUResponse resp = pair(apduChannel, PAIR_P1_FIRST_STEP, challenge).checkOK("Pairing failed on step 1");
+    APDUResponse resp = pair(apduChannel, PAIR_P1_FIRST_STEP, pairingMode, challenge).checkOK("Pairing failed on step 1");
 
     byte[] respData = resp.getData();
     byte[] cardCryptogram = Arrays.copyOf(respData, 32);
@@ -198,7 +198,7 @@ public class SecureChannelSession {
     md.update(sharedSecret);
     checkCryptogram = md.digest(cardChallenge);
 
-    resp = pair(apduChannel, PAIR_P1_LAST_STEP, checkCryptogram).checkOK("Pairing failed on step 2");
+    resp = pair(apduChannel, PAIR_P1_LAST_STEP, (byte) 0, checkCryptogram).checkOK("Pairing failed on step 2");
     respData = resp.getData();
     md.update(sharedSecret);
     pairing = new Pairing(md.digest(Arrays.copyOfRange(respData, 1, respData.length)), respData[0]);
@@ -261,11 +261,12 @@ public class SecureChannelSession {
    *
    * @param apduChannel the apdu channel
    * @param p1 the P1 parameter
+   * @param p2 the P2 parameter
    * @param data the data
    * @return the raw card response
    * @throws IOException communication error
    */
-  public APDUResponse pair(CardChannel apduChannel, byte p1, byte[] data) throws IOException {
+  public APDUResponse pair(CardChannel apduChannel, byte p1, byte p2, byte[] data) throws IOException {
     APDUCommand pair = new APDUCommand(0x80, INS_PAIR, p1, 0, data);
     return transmit(apduChannel, pair);
   }
