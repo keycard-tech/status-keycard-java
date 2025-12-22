@@ -267,7 +267,7 @@ public class SecureChannelSession {
    * @throws IOException communication error
    */
   public APDUResponse pair(CardChannel apduChannel, byte p1, byte p2, byte[] data) throws IOException {
-    APDUCommand pair = new APDUCommand(0x80, INS_PAIR, p1, 0, data);
+    APDUCommand pair = new APDUCommand(0x80, INS_PAIR, p1, p2, data);
     return transmit(apduChannel, pair);
   }
 
