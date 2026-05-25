@@ -233,6 +233,8 @@ public class SecureChannelV2Client implements SecureChannel {
     byte[] ciphertext = resp.getData();
     byte[] plaintext = decryptCCM(ciphertext);
 
+    incrementNonce();
+
     return new APDUResponse(plaintext);
   }
 
@@ -471,9 +473,6 @@ public class SecureChannelV2Client implements SecureChannel {
 
       aesCCM.init(Cipher.ENCRYPT_MODE, keyH2C, spec);
       byte[] ciphertext = aesCCM.doFinal(plaintext);
-
-      // Increment nonce counter (big-endian)
-      incrementNonce();
 
       return ciphertext; // CCM appends tag automatically
     } catch (Exception e) {
