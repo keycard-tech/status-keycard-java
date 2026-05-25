@@ -981,7 +981,7 @@ public class KeycardCommandSet {
    */
   public APDUResponse init(String pin, String altPin, String puk, byte[] sharedSecret, byte pinRetries, byte pukRetries) throws IOException, APDUException {
     // Build init data: PIN + PUK [+ retries(2) [+ altPIN]]
-    int baselen = pin.length() + puk.length();
+    int baselen = pin.length() + puk.length() + sharedSecret.length;
     int extlen;
 
     if (altPin != null) {
@@ -994,6 +994,7 @@ public class KeycardCommandSet {
 
     byte[] initData = Arrays.copyOf(pin.getBytes(), baselen + extlen);
     System.arraycopy(puk.getBytes(), 0, initData, pin.length(), puk.length());
+    System.arraycopy(sharedSecret, 0, initData, pin.length() + puk.length(), sharedSecret.length);
 
     if (extlen > 0) {
       initData[baselen] = pinRetries;
@@ -1006,13 +1007,12 @@ public class KeycardCommandSet {
 
     if (secureChannel instanceof SecureChannelV2Client) {
       // V2: open secure channel first, then send INIT as a normal encrypted command
-      ((SecureChannelV2Client) secureChannel).autoOpenSecureChannel(apduChannel);
+      secureChannel.autoOpenSecureChannel(apduChannel);
       APDUCommand initCmd = secureChannel.protectedCommand(0x80, INS_INIT, 0, 0, initData);
       return secureChannel.transmit(apduChannel, initCmd);
     } else {
       // V1: use one-shot encryption with the static shared secret
-      APDUCommand initCmd = new APDUCommand(0x80, INS_INIT, 0, 0,
-          ((SecureChannelSession) secureChannel).oneShotEncrypt(initData));
+      APDUCommand initCmd = new APDUCommand(0x80, INS_INIT, 0, 0, ((SecureChannelSession) secureChannel).oneShotEncrypt(initData));
       return apduChannel.send(initCmd);
     }
   }

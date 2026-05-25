@@ -74,8 +74,8 @@ public class SecureChannelV2Client implements SecureChannel {
   private final List<byte[]> whitelistedCardPublicKeys;
 
   // Session state
-  private final SecretKeySpec keyH2C = new SecretKeySpec(new byte[AES_KEY_SIZE], "AES");
-  private final SecretKeySpec keyC2H = new SecretKeySpec(new byte[AES_KEY_SIZE], "AES");
+  private SecretKeySpec keyH2C;
+  private SecretKeySpec keyC2H;
   private Cipher cipherH2C;  // card-to-client decrypt
   private Cipher cipherC2H;  // client-to-card encrypt
   private byte[] nonceCounter;
@@ -251,9 +251,8 @@ public class SecureChannelV2Client implements SecureChannel {
   @Override
   public void reset() {
     open = false;
-    keyH2C.getEncoded(); // ensure keys are valid references
-    Arrays.fill(keyH2C.getEncoded(), (byte) 0);
-    Arrays.fill(keyC2H.getEncoded(), (byte) 0);
+    keyH2C = null;
+    keyC2H = null;
     Arrays.fill(nonceCounter, (byte) 0);
     cardIdentPub = null;
     clientEphPub = null;
@@ -284,8 +283,8 @@ public class SecureChannelV2Client implements SecureChannel {
     byte[] okm = hkdfExpand(salt, sharedSecret, PROTOCOL_LABEL, OKM_SIZE);
 
     // Set session keys: key_h2c = OKM[0..15], key_c2h = OKM[16..31]
-    System.arraycopy(okm, 0, keyH2C.getEncoded(), 0, AES_KEY_SIZE);
-    System.arraycopy(okm, AES_KEY_SIZE, keyC2H.getEncoded(), 0, AES_KEY_SIZE);
+    keyH2C = new SecretKeySpec(okm, 0, AES_KEY_SIZE, "AES");
+    keyC2H = new SecretKeySpec(okm, AES_KEY_SIZE, AES_KEY_SIZE, "AES");
 
     initCiphers();
 
@@ -419,28 +418,13 @@ public class SecureChannelV2Client implements SecureChannel {
     try {
       ECParameterSpec ecSpec = ECNamedCurveTable.getParameterSpec("secp256k1");
 
-      // Decode the card's uncompressed public key
       ECPublicKeySpec cardKeySpec = new ECPublicKeySpec(ecSpec.getCurve().decodePoint(cardPubUncompressed), ecSpec);
       ECPublicKey cardPub = (ECPublicKey) KeyFactory.getInstance("EC", "BC").generatePublic(cardKeySpec);
 
-      // Perform ECDH key agreement
       KeyAgreement ka = KeyAgreement.getInstance("ECDH", "BC");
       ka.init(clientPriv);
       ka.doPhase(cardPub, true);
-      byte[] sharedSecret = ka.generateSecret();
-
-      // ECDH via BC may return 64 bytes (XY) or 32 bytes (X only).
-      // The card uses ALG_EC_SVDP_DH_PLAIN which returns XY, taking first 32 as X.
-      if (sharedSecret.length == ECDH_SHARED_X_SIZE * 2) {
-        return Arrays.copyOfRange(sharedSecret, 0, ECDH_SHARED_X_SIZE);
-      } else if (sharedSecret.length == ECDH_SHARED_X_SIZE) {
-        return sharedSecret;
-      } else {
-        // Normalize to 32 bytes
-        byte[] result = new byte[ECDH_SHARED_X_SIZE];
-        System.arraycopy(sharedSecret, 0, result, 0, Math.min(sharedSecret.length, ECDH_SHARED_X_SIZE));
-        return result;
-      }
+      return ka.generateSecret();
     } catch (Exception e) {
       throw new RuntimeException("ECDH key agreement failed", e);
     }
