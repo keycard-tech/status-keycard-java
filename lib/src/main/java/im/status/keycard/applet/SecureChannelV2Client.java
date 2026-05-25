@@ -76,8 +76,7 @@ public class SecureChannelV2Client implements SecureChannel {
   // Session state
   private SecretKeySpec keyH2C;
   private SecretKeySpec keyC2H;
-  private Cipher cipherH2C;  // card-to-client decrypt
-  private Cipher cipherC2H;  // client-to-card encrypt
+  private Cipher aesCCM;
   private byte[] nonceCounter;
   private boolean open;
 
@@ -117,8 +116,7 @@ public class SecureChannelV2Client implements SecureChannel {
 
   private void initCiphers() {
     try {
-      cipherH2C = Cipher.getInstance("AES/CCM/NoPadding", "BC");
-      cipherC2H = Cipher.getInstance("AES/CCM/NoPadding", "BC");
+      aesCCM = Cipher.getInstance("AES/CCM/NoPadding", "BC");
       nonceCounter = new byte[CCM_NONCE_SIZE];
     } catch (Exception e) {
       throw new RuntimeException("Is BouncyCastle in the classpath?", e);
@@ -471,8 +469,8 @@ public class SecureChannelV2Client implements SecureChannel {
       byte[] nonce = Arrays.copyOf(nonceCounter, CCM_NONCE_SIZE);
       GCMParameterSpec spec = new GCMParameterSpec(CCM_TAG_SIZE * 8, nonce);
 
-      cipherC2H.init(Cipher.ENCRYPT_MODE, keyC2H, spec);
-      byte[] ciphertext = cipherC2H.doFinal(plaintext);
+      aesCCM.init(Cipher.ENCRYPT_MODE, keyH2C, spec);
+      byte[] ciphertext = aesCCM.doFinal(plaintext);
 
       // Increment nonce counter (big-endian)
       incrementNonce();
@@ -494,8 +492,8 @@ public class SecureChannelV2Client implements SecureChannel {
       byte[] nonce = Arrays.copyOf(nonceCounter, CCM_NONCE_SIZE);
       GCMParameterSpec spec = new GCMParameterSpec(CCM_TAG_SIZE * 8, nonce);
 
-      cipherH2C.init(Cipher.DECRYPT_MODE, keyH2C, spec);
-      return cipherH2C.doFinal(ciphertext);
+      aesCCM.init(Cipher.DECRYPT_MODE, keyC2H, spec);
+      return aesCCM.doFinal(ciphertext);
     } catch (Exception e) {
       open = false;
       throw new RuntimeException("AES-CCM decryption failed", e);
