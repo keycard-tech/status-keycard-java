@@ -207,24 +207,14 @@ public class KeycardCommandSet {
     APDUCommand selectApplet = new APDUCommand(0x00, 0xA4, 4, 0, Identifiers.getKeycardInstanceAID(instanceIdx));
     APDUResponse resp =  apduChannel.send(selectApplet);
 
-
     if (resp.getSw() == 0x9000) {
       info = new ApplicationInfo(resp.getData());
 
       if (info.hasSecureChannelCapability()) {
-        // Choose secure channel version based on applet version
-        // V2 (app version >= 4.0): ECDHE + HKDF + AES-128-CCM
-        // V1 (app version < 4.0): AES-CBC + CMAC + pairing
         if (isV2(info)) {
           SecureChannelV2Client scV2 = new SecureChannelV2Client(caPublicKeys, whitelistedCardPublicKeys);
           byte[] certData = info.getCertData();
-          if (certData != null) {
-            try {
-              scV2.setCardCertificate(certData);
-            } catch (APDUException e) {
-              throw new RuntimeException("Failed to parse card certificate", e);
-            }
-          }
+          scV2.setCardCertificate(certData);
           this.secureChannel = scV2;
         } else {
           SecureChannelSession scV1 = new SecureChannelSession();

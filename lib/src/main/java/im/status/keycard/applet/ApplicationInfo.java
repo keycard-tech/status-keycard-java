@@ -66,6 +66,12 @@ public class ApplicationInfo {
     // appVersion (INTEGER 0x02) - present in all versions
     appVersion = (short) tlv.readInt();
 
+    if (tlv.nextTagIs(TinyBERTLV.TLV_BOOL)) {
+      initializedCard = tlv.readBoolean();
+    } else {
+      initializedCard = true;
+    }
+
     // freePairingSlots (INTEGER 0x02) - present in V1-V3, absent in V4+
     if (tlv.nextTagIs(TinyBERTLV.TLV_INT)) {
       freePairingSlots = (byte) tlv.readInt();
@@ -85,8 +91,6 @@ public class ApplicationInfo {
     if (tlv.nextTagIs(Certificate.TLV_CERT)) {
       certData = tlv.readPrimitive(Certificate.TLV_CERT);
     }
-
-    initializedCard = true;
   }
 
   /**

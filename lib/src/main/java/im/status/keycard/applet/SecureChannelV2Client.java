@@ -356,9 +356,9 @@ public class SecureChannelV2Client implements SecureChannel {
    * validates the CA public key against the known anchor.
    *
    * @param certData the 98-byte certificate from the SELECT response
-   * @throws APDUException if CA verification fails
+   * @throws IOException if CA verification fails
    */
-  public void setCardCertificate(byte[] certData) throws APDUException {
+  public void setCardCertificate(byte[] certData) throws IOException {
     try {
       Certificate cert = Certificate.fromTLV(certData);
       cardIdentPub = cert.getIdentPub();
@@ -371,12 +371,12 @@ public class SecureChannelV2Client implements SecureChannel {
       boolean caTrusted = isCaTrusted(caPub);
 
       if (!caTrusted && !whitelisted) {
-        throw new APDUException("Card certificate verification failed: unknown CA public key and card not whitelisted");
+        throw new IOException("Card certificate verification failed: unknown CA public key and card not whitelisted");
       }
-    } catch (APDUException e) {
+    } catch (IOException e) {
       throw e;
     } catch (Exception e) {
-      throw new APDUException("Failed to parse card certificate: " + e.getMessage());
+      throw new IOException("Failed to parse card certificate: " + e.getMessage());
     }
   }
 
