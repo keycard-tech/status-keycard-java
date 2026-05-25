@@ -37,10 +37,7 @@ public class ApplicationInfo {
   public ApplicationInfo(byte[] tlvData) throws IllegalArgumentException {
     TinyBERTLV tlv = new TinyBERTLV(tlvData);
 
-    int topTag = tlv.readTag();
-    tlv.unreadLastTag();
-
-    if (topTag == TLV_PUB_KEY) {
+    if (tlv.nextTagIs(TLV_PUB_KEY)) {
       secureChannelPubKey = tlv.readPrimitive(TLV_PUB_KEY);
       initializedCard = false;
       capabilities = CAPABILITY_CREDENTIALS_MANAGEMENT;
@@ -55,17 +52,14 @@ public class ApplicationInfo {
     tlv.enterConstructed(TLV_APPLICATION_INFO_TEMPLATE);
 
     // Parse fields conditionally by tag for cross-version compatibility.
-    // V4+ applets omit instanceUID, secureChannelPubKey and freePairingSlots.
 
     // instanceUID (0x8F) - present in V1-V3, absent in V4+
-    if (tlv.readTag() == TLV_UID) {
-      tlv.unreadLastTag();
+    if (tlv.nextTagIs(TLV_UID)) {
       instanceUID = tlv.readPrimitive(TLV_UID);
     }
 
     // secureChannelPubKey (0x80) - present in V1-V3, absent in V4+
-    if (tlv.readTag() == TLV_PUB_KEY) {
-      tlv.unreadLastTag();
+    if (tlv.nextTagIs(TLV_PUB_KEY)) {
       secureChannelPubKey = tlv.readPrimitive(TLV_PUB_KEY);
     }
 
@@ -73,29 +67,23 @@ public class ApplicationInfo {
     appVersion = (short) tlv.readInt();
 
     // freePairingSlots (INTEGER 0x02) - present in V1-V3, absent in V4+
-    if (tlv.readTag() == TinyBERTLV.TLV_INT) {
-      tlv.unreadLastTag();
+    if (tlv.nextTagIs(TinyBERTLV.TLV_INT)) {
       freePairingSlots = (byte) tlv.readInt();
     }
 
     // keyUID (0x8E) - present in all versions
     keyUID = tlv.readPrimitive(TLV_KEY_UID);
 
-    // capabilities (0x8D) - optional; if absent assume all capabilities
-    if (tlv.readTag() != TinyBERTLV.END_OF_TLV) {
-      tlv.unreadLastTag();
+    // capabilities (0x8D) - present in V2+
+    if (tlv.nextTagIs(TLV_CAPABILITIES)) {
       capabilities = tlv.readPrimitive(TLV_CAPABILITIES)[0];
     } else {
       capabilities = CAPABILITIES_ALL;
     }
 
-    // Parse optional certificate (V2 identity certificate, TLV tag 0x8A)
-    if (tlv.readTag() != TinyBERTLV.END_OF_TLV) {
-      tlv.unreadLastTag();
-      if (tlv.readTag() == Certificate.TLV_CERT) {
-        tlv.unreadLastTag();
-        certData = tlv.readPrimitive(Certificate.TLV_CERT);
-      }
+    // Parse certificate - present in V4+
+    if (tlv.nextTagIs(Certificate.TLV_CERT)) {
+      certData = tlv.readPrimitive(Certificate.TLV_CERT);
     }
 
     initializedCard = true;

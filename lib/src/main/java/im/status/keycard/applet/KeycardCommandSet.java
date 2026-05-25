@@ -161,15 +161,6 @@ public class KeycardCommandSet {
   }
 
   /**
-   * Set the SecureChannel object.
-   *
-   * @param secureChannel secure channel implementation
-   */
-  protected void setSecureChannel(SecureChannel secureChannel) {
-    this.secureChannel = secureChannel;
-  }
-
-  /**
    * Returns the current secure channel implementation.
    *
    * @return the secure channel
