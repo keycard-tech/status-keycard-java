@@ -119,6 +119,15 @@ public class Certificate extends RecoverableSignature {
     }     
   }
 
+  /**
+   * Returns the card's identity public key (compressed, 33 bytes).
+   *
+   * @return the compressed identity public key
+   */
+  public byte[] getIdentPub() {
+    return identPub;
+  }
+
   public byte[] toStoreData() {
     if (identPriv == null) {
       throw new IllegalStateException("The private key must be set.");

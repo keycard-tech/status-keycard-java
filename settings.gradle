@@ -1,4 +1,3 @@
 include 'lib'
-include 'android'
+//include 'android'
 include 'desktop'
-include 'demo-android'
