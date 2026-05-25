@@ -10,6 +10,9 @@ import javax.crypto.spec.PBEKeySpec;
 import java.io.IOException;
 import java.security.KeyPair;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * This class is used to send APDU to the applet. Each method corresponds to an APDU as defined in the APPLICATION.md
@@ -102,8 +105,8 @@ public class KeycardCommandSet {
   private final CardChannel apduChannel;
   private SecureChannel secureChannel;
   private ApplicationInfo info;
-  private final byte[][] caPublicKeys;
-  private final byte[][] whitelistedCardPublicKeys;
+  private final List<byte[]> caPublicKeys;
+  private final List<byte[]> whitelistedCardPublicKeys;
 
   /**
    * Creates a KeycardCommandSet using the given APDU Channel.
@@ -125,7 +128,7 @@ public class KeycardCommandSet {
    * @param caPublicKey compressed secp256k1 CA public key (33 bytes)
    */
   public KeycardCommandSet(CardChannel apduChannel, byte[] caPublicKey) {
-    this(apduChannel, new byte[][]{caPublicKey}, new byte[0][]);
+    this(apduChannel, Collections.singletonList(caPublicKey), Collections.emptyList());
   }
 
   /**
@@ -137,7 +140,7 @@ public class KeycardCommandSet {
    * @param caPublicKeys array of compressed secp256k1 CA public keys (33 bytes each), may be empty but not null
    * @param whitelistedCardPublicKeys array of compressed card identity public keys (33 bytes each), may be empty but not null
    */
-  public KeycardCommandSet(CardChannel apduChannel, byte[][] caPublicKeys, byte[][] whitelistedCardPublicKeys) {
+  public KeycardCommandSet(CardChannel apduChannel, List<byte[]> caPublicKeys, List<byte[]> whitelistedCardPublicKeys) {
     if (caPublicKeys == null) {
       throw new IllegalArgumentException("caPublicKeys must not be null");
     }
@@ -213,15 +216,13 @@ public class KeycardCommandSet {
       if (info.hasSecureChannelCapability()) {
         if (isV2(info)) {
           SecureChannelV2Client scV2 = new SecureChannelV2Client(caPublicKeys, whitelistedCardPublicKeys);
-          byte[] certData = info.getCertData();
-          scV2.setCardCertificate(certData);
+          scV2.setCardCertificate(info.getCertData());
           this.secureChannel = scV2;
         } else {
           SecureChannelSession scV1 = new SecureChannelSession();
           scV1.generateSecret(info.getSecureChannelPubKey());
           this.secureChannel = scV1;
         }
-        this.secureChannel.reset();
       }
     }
 

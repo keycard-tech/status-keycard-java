@@ -90,16 +90,6 @@ public class SecureChannelV2Client implements SecureChannel {
   private final SecureRandom random;
 
   /**
-   * Creates a V2 secure channel client with the given CA public key for
-   * certificate verification during handshake.
-   *
-   * @param caPublicKey compressed secp256k1 CA public key (33 bytes)
-   */
-  public SecureChannelV2Client(byte[] caPublicKey) {
-    this(new byte[][]{caPublicKey}, new byte[0][]);
-  }
-
-  /**
    * Creates a V2 secure channel client with the given set of trusted CA public keys
    * and optionally whitelisted card identity public keys.
    *
@@ -109,28 +99,20 @@ public class SecureChannelV2Client implements SecureChannel {
    *   <li>The card's identity public key is in the whitelist</li>
    * </ul>
    *
-   * @param caPublicKeys array of compressed secp256k1 CA public keys (33 bytes each), may be empty but not null
-   * @param whitelistedCardPublicKeys array of compressed card identity public keys (33 bytes each), may be empty but not null
+   * @param caPublicKeys list of compressed secp256k1 CA public keys (33 bytes each)
+   * @param whitelistedCardPublicKeys list of compressed card identity public keys (33 bytes each)
    */
-  public SecureChannelV2Client(byte[][] caPublicKeys, byte[][] whitelistedCardPublicKeys) {
+  public SecureChannelV2Client(List<byte[]> caPublicKeys, List<byte[]> whitelistedCardPublicKeys) {
     if (caPublicKeys == null) {
       throw new IllegalArgumentException("caPublicKeys must not be null");
     }
     if (whitelistedCardPublicKeys == null) {
       throw new IllegalArgumentException("whitelistedCardPublicKeys must not be null");
     }
-    this.caPublicKeys = Collections.unmodifiableList(toList(caPublicKeys));
-    this.whitelistedCardPublicKeys = Collections.unmodifiableList(toList(whitelistedCardPublicKeys));
+    this.caPublicKeys = Collections.unmodifiableList(caPublicKeys);
+    this.whitelistedCardPublicKeys = Collections.unmodifiableList(whitelistedCardPublicKeys);
     this.random = new SecureRandom();
     initCiphers();
-  }
-
-  private static List<byte[]> toList(byte[][] array) {
-    List<byte[]> list = new java.util.ArrayList<>(array.length);
-    for (byte[] elem : array) {
-      list.add(elem);
-    }
-    return list;
   }
 
   private void initCiphers() {
@@ -286,8 +268,7 @@ public class SecureChannelV2Client implements SecureChannel {
    * @param clientEphPriv the client's ephemeral private key
    * @param cardResponse the raw response data (card_eph_pub || DER_signature)
    */
-  void processHandshakeResponse(byte[] salt, PrivateKey clientEphPriv,
-      byte[] cardResponse) throws APDUException {
+  void processHandshakeResponse(byte[] salt, PrivateKey clientEphPriv, byte[] cardResponse) throws APDUException {
     // Parse card response: card_eph_pub (65B) || sig (DER, variable)
     if (cardResponse.length < PUBKEY_SIZE + 2) {
       throw new APDUException("Invalid handshake response: too short");
@@ -317,8 +298,7 @@ public class SecureChannelV2Client implements SecureChannel {
     open = true;
   }
 
-  private void verifyCardSignature(byte[] salt, byte[] clientPub, byte[] cardPub,
-      byte[] signature) throws APDUException {
+  private void verifyCardSignature(byte[] salt, byte[] clientPub, byte[] cardPub, byte[] signature) throws APDUException {
     try {
       // Hash the transcript
       MessageDigest md = MessageDigest.getInstance("SHA-256", "BC");
