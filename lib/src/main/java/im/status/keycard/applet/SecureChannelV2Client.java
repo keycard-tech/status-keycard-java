@@ -312,7 +312,7 @@ public class SecureChannelV2Client implements SecureChannel {
       }
 
       // Verify the ECDSA signature using standard JCA API
-      Signature verifier = Signature.getInstance("SHA256withECDSA", "BC");
+      Signature verifier = Signature.getInstance("NONEwithECDSA", "BC");
       ECParameterSpec ecSpec = ECNamedCurveTable.getParameterSpec("secp256k1");
       ECPublicKeySpec keySpec = new ECPublicKeySpec(ecSpec.getCurve().decodePoint(cardIdentPub), ecSpec);
       ECPublicKey identKey = (ECPublicKey) KeyFactory.getInstance("EC", "BC").generatePublic(keySpec);

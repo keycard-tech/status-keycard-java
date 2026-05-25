@@ -10,7 +10,6 @@ import javax.crypto.spec.PBEKeySpec;
 import java.io.IOException;
 import java.security.KeyPair;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
