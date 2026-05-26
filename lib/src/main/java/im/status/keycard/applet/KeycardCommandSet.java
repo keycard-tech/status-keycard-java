@@ -35,8 +35,10 @@ public class KeycardCommandSet {
   static final byte INS_SIGN = (byte) 0xC0;
   static final byte INS_SET_PINLESS_PATH = (byte) 0xC1;
   static final byte INS_EXPORT_KEY = (byte) 0xC2;
+  static final byte INS_EXPORT_LEE = (byte) 0xC3;
   static final byte INS_GET_DATA = (byte) 0xCA;
   static final byte INS_STORE_DATA = (byte) 0xE2;
+  static final byte INS_GET_CHALLENGE = (byte) 0x84;
 
   public static final byte CHANGE_PIN_P1_USER_PIN = 0x00;
   public static final byte CHANGE_PIN_P1_PUK = 0x01;
@@ -48,6 +50,7 @@ public class KeycardCommandSet {
   public static final byte LOAD_KEY_P1_EC = 0x01;
   public static final byte LOAD_KEY_P1_EXT_EC = 0x02;
   public static final byte LOAD_KEY_P1_SEED = 0x03;
+  public static final byte LOAD_KEY_P1_LEE = 0x04;
 
   public static final byte DERIVE_P1_SOURCE_MASTER = (byte) 0x00;
   public static final byte DERIVE_P1_SOURCE_PARENT = (byte) 0x40;
@@ -59,7 +62,9 @@ public class KeycardCommandSet {
   static final byte SIGN_P1_PINLESS = 0x03;
 
   public static final byte SIGN_P2_ECDSA = 0x00;
-  public static final byte SIGN_P2_BLS12_381 = 0x01;
+  public static final byte SIGN_P2_EDDSA_ED25519 = 0x01;
+  public static final byte SIGN_P2_BLS12_381 = 0x02;
+  public static final byte SIGN_P2_BIP340_SCHNORR = 0x03;
 
   public static final byte STORE_DATA_P1_PUBLIC = 0x00;
   public static final byte STORE_DATA_P1_NDEF = 0x01;
@@ -149,7 +154,7 @@ public class KeycardCommandSet {
     this.apduChannel = apduChannel;
     this.caPublicKeys = caPublicKeys;
     this.whitelistedCardPublicKeys = whitelistedCardPublicKeys;
-    this.secureChannel = new SecureChannelV2Client(caPublicKeys, whitelistedCardPublicKeys);
+    this.secureChannel = new SecureChannelV2(caPublicKeys, whitelistedCardPublicKeys);
   }
 
   /**
@@ -213,12 +218,12 @@ public class KeycardCommandSet {
       info = new ApplicationInfo(resp.getData());
 
       if (info.hasSecureChannelCapability()) {
-        if (isV2(info)) {
-          SecureChannelV2Client scV2 = new SecureChannelV2Client(caPublicKeys, whitelistedCardPublicKeys);
+        if (isSecureChannelV2(info)) {
+          SecureChannelV2 scV2 = new SecureChannelV2(caPublicKeys, whitelistedCardPublicKeys);
           scV2.setCardCertificate(info.getCertData());
           this.secureChannel = scV2;
         } else {
-          SecureChannelSession scV1 = new SecureChannelSession();
+          SecureChannelV1 scV1 = new SecureChannelV1();
           scV1.generateSecret(info.getSecureChannelPubKey());
           this.secureChannel = scV1;
         }
@@ -486,6 +491,19 @@ public class KeycardCommandSet {
   }
 
   /**
+   * Sends a LOAD KEY APDU. The given seed is sent as-is and the P1 of the command is set to LOAD_KEY_P1_LEE (0x04).
+   * This works on cards which support public key derivation. The loaded keyset is extended and support further
+   * key derivation.
+   *
+   * @param seed the binary seed
+   * @return the raw card response
+   * @throws IOException communication error
+   */
+  public APDUResponse loadLEEKey(byte[] seed) throws IOException {
+    return loadKey(seed, LOAD_KEY_P1_LEE);
+  }  
+
+  /**
    * Sends a LOAD KEY APDU. The key is sent in TLV format, includes the public key and no chain code, meaning that
    * the card will not be able to do further key derivation.
    *
@@ -615,11 +633,26 @@ public class KeycardCommandSet {
    * @throws IOException communication error
    */
   public APDUResponse signWithPath(byte[] hash, String path, boolean makeCurrent) throws IOException {
+    return signWithPath(hash, path, SIGN_P2_ECDSA, makeCurrent);
+  }
+
+  /**
+   * Sends a SIGN APDU. This signs a precomputed hash that must be exactly 32-bytes long. The key used to sign is given
+   * as a parameter.
+   *
+   * @param hash the hash to sign
+   * @params path the path of the key to use
+   * @oarams algo the signing algorithm
+   * @param makeCurrent ture if the key used to sign should become the current key, false otherwise
+   * @return the raw card response
+   * @throws IOException communication error
+   */
+  public APDUResponse signWithPath(byte[] hash, String path, int algo, boolean makeCurrent) throws IOException {
     KeyPath keyPath = new KeyPath(path);
     byte[] pathData = keyPath.getData();
     byte[] data = Arrays.copyOf(hash, hash.length + pathData.length);
     System.arraycopy(pathData, 0, data, hash.length, pathData.length);
-    return sign(data, keyPath.getSource() | (makeCurrent ? SIGN_P1_DERIVE_AND_MAKE_CURRENT : SIGN_P1_DERIVE));
+    return sign(data, keyPath.getSource() | (makeCurrent ? SIGN_P1_DERIVE_AND_MAKE_CURRENT : SIGN_P1_DERIVE), algo);
   }
 
   /**
@@ -644,9 +677,14 @@ public class KeycardCommandSet {
    * @throws IOException communication error
    */
   public APDUResponse sign(byte[] data, int p1) throws IOException {
-    APDUCommand sign = secureChannel.protectedCommand(0x80, INS_SIGN, p1, 0x00, data);
+    return sign(data, p1, SIGN_P2_ECDSA);
+  }
+
+  public APDUResponse sign(byte[] data, int p1, int p2) throws IOException {
+    APDUCommand sign = secureChannel.protectedCommand(0x80, INS_SIGN, p1, p2, data);
     return secureChannel.transmit(apduChannel, sign);
   }
+
 
   /**
    * Sends a DERIVE KEY APDU with the given key path.
@@ -832,6 +870,31 @@ public class KeycardCommandSet {
   }  
 
   /**
+   * Sends an EXPORT LEE APDU.
+   *
+   * @param keypath the derivation path
+   * @return the raw card response
+   * @throws IOException communication error
+   */  
+  public APDUResponse exportLEEKey(String keyPath) throws IOException {
+    KeyPath path = new KeyPath(keyPath);
+    return exportLEEKey(path.getData(), path.getSource());
+  }
+
+  /**
+   * Sends an EXPORT LEE APDU.
+   *
+   * @param path the derivation path
+   * @param source the derivation source
+   * @return the raw card response
+   * @throws IOException communication error
+   */ 
+  public APDUResponse exportLEEKey(byte[] path, int source) throws IOException {
+    APDUCommand exportLee = secureChannel.protectedCommand(0x80, INS_EXPORT_LEE, source, 0, path);
+    return secureChannel.transmit(apduChannel, exportLee);
+  }
+
+  /**
    * Sends a GET DATA APDU.
    *
    * @param dataType the type of data to be stored
@@ -841,6 +904,11 @@ public class KeycardCommandSet {
   public APDUResponse getData(byte dataType) throws IOException {
     APDUCommand getData = secureChannel.protectedCommand(0x80, INS_GET_DATA, dataType, 0, new byte[0]);
     return secureChannel.transmit(apduChannel, getData);
+  }
+
+  public APDUResponse getChallenge(int len) throws IOException {
+    APDUCommand getChallenge = secureChannel.protectedCommand(0x80, INS_GET_CHALLENGE, len, 0, new byte[0]);
+    return secureChannel.transmit(apduChannel, getChallenge);
   }
 
   /**
@@ -1005,14 +1073,14 @@ public class KeycardCommandSet {
       }
     }
 
-    if (secureChannel instanceof SecureChannelV2Client) {
+    if (secureChannel instanceof SecureChannelV2) {
       // V2: open secure channel first, then send INIT as a normal encrypted command
       secureChannel.autoOpenSecureChannel(apduChannel);
       APDUCommand initCmd = secureChannel.protectedCommand(0x80, INS_INIT, 0, 0, initData);
       return secureChannel.transmit(apduChannel, initCmd);
     } else {
       // V1: use one-shot encryption with the static shared secret
-      APDUCommand initCmd = new APDUCommand(0x80, INS_INIT, 0, 0, ((SecureChannelSession) secureChannel).oneShotEncrypt(initData));
+      APDUCommand initCmd = new APDUCommand(0x80, INS_INIT, 0, 0, ((SecureChannelV1) secureChannel).oneShotEncrypt(initData));
       return apduChannel.send(initCmd);
     }
   }
@@ -1032,9 +1100,9 @@ public class KeycardCommandSet {
    * Returns true if the applet uses Secure Channel V2 (app version >= 4.0).
    *
    * @param appInfo the application info from SELECT
-   * @return true for V2, false for V1
+   * @return true for Secure Channel V2, false for V1
    */
-  private boolean isV2(ApplicationInfo appInfo) {
-    return (appInfo.getAppVersion() >> 8) >= 4;
+  private boolean isSecureChannelV2(ApplicationInfo appInfo) {
+    return appInfo.getAppVersion() >= 0x0400;
   }
 }

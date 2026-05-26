@@ -12,13 +12,15 @@ public class ApplicationInfo {
   private byte freePairingSlots;
   private byte[] keyUID;
   private byte capabilities;
-  private byte[] certData; // V2: 98-byte identity certificate
+  private byte[] certData;
+  private byte appStatus;
 
   public static final byte TLV_APPLICATION_INFO_TEMPLATE = (byte) 0xA4;
   public static final byte TLV_PUB_KEY = (byte) 0x80;
   public static final byte TLV_UID = (byte) 0x8F;
   public static final byte TLV_KEY_UID = (byte) 0x8E;
   public static final byte TLV_CAPABILITIES = (byte) 0x8D;
+  public static final byte TLV_STATUS = (byte) 0x8C;
 
   static final byte CAPABILITY_SECURE_CHANNEL = (byte) 0x01;
   static final byte CAPABILITY_KEY_MANAGEMENT = (byte) 0x02;
@@ -27,6 +29,9 @@ public class ApplicationInfo {
   static final byte CAPABILITY_FACTORY_RESET = (byte) 0x10;
 
   static final byte CAPABILITIES_ALL = CAPABILITY_SECURE_CHANNEL | CAPABILITY_KEY_MANAGEMENT | CAPABILITY_CREDENTIALS_MANAGEMENT | CAPABILITY_NDEF | CAPABILITY_FACTORY_RESET;
+
+  static final byte APP_STATUS_INITIALIZED = 0x10;
+  static final byte APP_STATUS_LEE_MODE = 0x20;
 
   /**
    * Constructs an object by parsing the TLV data.
@@ -66,9 +71,12 @@ public class ApplicationInfo {
     // appVersion (INTEGER 0x02) - present in all versions
     appVersion = (short) tlv.readInt();
 
-    if (tlv.nextTagIs(TinyBERTLV.TLV_BOOL)) {
-      initializedCard = tlv.readBoolean();
+    // appStatud (0x8C) - initialized, lee mode, pin retries
+    if (tlv.nextTagIs(TLV_STATUS)) {
+      appStatus = tlv.readPrimitive(TLV_STATUS)[0];
+      initializedCard = (appStatus & APP_STATUS_INITIALIZED) == APP_STATUS_INITIALIZED;
     } else {
+      appStatus = APP_STATUS_INITIALIZED;
       initializedCard = true;
     }
 
@@ -228,10 +236,33 @@ public class ApplicationInfo {
   }
 
   /**
+   * Returns true if the device has loaded LEE keys.
+   *
+   * @return true or false
+   */
+  public boolean isLEEMode() {
+    return (appStatus & APP_STATUS_LEE_MODE) == APP_STATUS_LEE_MODE;
+  }
+
+  /**
+   * Returns the number of remaining PIN retries. 
+   * Only available on applet V4+, returns -1 on older cards.
+   *
+   * @return pin retry counter
+   */
+  public byte getPINRetries() {
+    if (appVersion < 0x0400) {
+      return -1;
+    }
+
+    return (byte) (appStatus & 0x0f);
+  }
+
+  /**
    * Returns the raw identity certificate data (V2 only).
    *
    * This is the 98-byte certificate: compressed_pubkey(33) || r(32) || s(32) || v(1).
-   * Used by {@link SecureChannelV2Client} for card authentication during handshake.
+   * Used by {@link SecureChannelV2} for card authentication during handshake.
    *
    * @return the certificate data, or null if not present (V1 cards)
    */

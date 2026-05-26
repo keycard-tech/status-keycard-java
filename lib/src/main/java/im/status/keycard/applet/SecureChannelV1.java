@@ -28,7 +28,7 @@ import java.util.Arrays;
  *
  * Implements the {@link SecureChannel} interface for interoperability with V2.
  */
-public class SecureChannelSession implements SecureChannel {
+public class SecureChannelV1 implements SecureChannel {
   public static final short SC_SECRET_LENGTH = 32;
   public static final short SC_BLOCK_SIZE = 16;
 
@@ -59,7 +59,7 @@ public class SecureChannelSession implements SecureChannel {
   /**
    * Constructs a SecureChannel session on the client.
    */
-  public SecureChannelSession() {
+  public SecureChannelV1() {
       random = new SecureRandom();
       open = false;
   }

@@ -49,12 +49,10 @@ import java.util.Arrays;
  * Unlike V1, V2 does not use pairing. Each session establishes independent keys
  * via ECDHE, authenticated by the card's persistent identity key certificate.
  */
-public class SecureChannelV2Client implements SecureChannel {
+public class SecureChannelV2 implements SecureChannel {
 
   // Protocol constants
-  private static final byte[] PROTOCOL_LABEL = {
-      's', 'c', '_', 'v', '2', '_', 'c', 'c', 'm', (byte) 0x00
-  };
+  private static final byte[] PROTOCOL_LABEL = { 's', 'c', '_', 'v', '2', '_', 'c', 'c', 'm' };
 
   static final short HKDF_SALT_SIZE = 32;
   static final short PUBKEY_SIZE = 65;       // uncompressed secp256k1 point
@@ -63,6 +61,7 @@ public class SecureChannelV2Client implements SecureChannel {
   static final short AES_KEY_SIZE = 16;
   static final short CCM_TAG_SIZE = 8;
   static final short CCM_NONCE_SIZE = 13;
+  static final short SIGNATURE_DOMAIN_LEN = 5;
 
   static final byte INS_OPEN_SECURE_CHANNEL = (byte) 0x10;
   static final byte INS_SECURED_APDU = (byte) 0x18;
@@ -101,7 +100,7 @@ public class SecureChannelV2Client implements SecureChannel {
    * @param caPublicKeys list of compressed secp256k1 CA public keys (33 bytes each)
    * @param whitelistedCardPublicKeys list of compressed card identity public keys (33 bytes each)
    */
-  public SecureChannelV2Client(List<byte[]> caPublicKeys, List<byte[]> whitelistedCardPublicKeys) {
+  public SecureChannelV2(List<byte[]> caPublicKeys, List<byte[]> whitelistedCardPublicKeys) {
     if (caPublicKeys == null) {
       throw new IllegalArgumentException("caPublicKeys must not be null");
     }
@@ -301,6 +300,7 @@ public class SecureChannelV2Client implements SecureChannel {
     try {
       // Hash the transcript
       MessageDigest md = MessageDigest.getInstance("SHA-256", "BC");
+      md.update(PROTOCOL_LABEL, 0, SIGNATURE_DOMAIN_LEN);
       md.update(salt);
       md.update(clientPub);
       md.update(cardPub);
