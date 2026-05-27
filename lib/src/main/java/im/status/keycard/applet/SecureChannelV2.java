@@ -300,7 +300,7 @@ public class SecureChannelV2 implements SecureChannel {
     try {
       // Hash the transcript
       MessageDigest md = MessageDigest.getInstance("SHA-256", "BC");
-      md.update(PROTOCOL_LABEL, 0, SIGNATURE_DOMAIN_LEN);
+      md.update(PROTOCOL_LABEL);
       md.update(salt);
       md.update(clientPub);
       md.update(cardPub);
