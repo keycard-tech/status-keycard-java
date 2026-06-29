@@ -10,6 +10,8 @@ import javax.crypto.spec.PBEKeySpec;
 import java.io.IOException;
 import java.security.KeyPair;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * This class is used to send APDU to the applet. Each method corresponds to an APDU as defined in the APPLICATION.md
@@ -33,8 +35,10 @@ public class KeycardCommandSet {
   static final byte INS_SIGN = (byte) 0xC0;
   static final byte INS_SET_PINLESS_PATH = (byte) 0xC1;
   static final byte INS_EXPORT_KEY = (byte) 0xC2;
+  static final byte INS_EXPORT_LEE = (byte) 0xC3;
   static final byte INS_GET_DATA = (byte) 0xCA;
   static final byte INS_STORE_DATA = (byte) 0xE2;
+  static final byte INS_GET_CHALLENGE = (byte) 0x84;
 
   public static final byte CHANGE_PIN_P1_USER_PIN = 0x00;
   public static final byte CHANGE_PIN_P1_PUK = 0x01;
@@ -46,6 +50,7 @@ public class KeycardCommandSet {
   public static final byte LOAD_KEY_P1_EC = 0x01;
   public static final byte LOAD_KEY_P1_EXT_EC = 0x02;
   public static final byte LOAD_KEY_P1_SEED = 0x03;
+  public static final byte LOAD_KEY_P1_LEE = 0x04;
 
   public static final byte DERIVE_P1_SOURCE_MASTER = (byte) 0x00;
   public static final byte DERIVE_P1_SOURCE_PARENT = (byte) 0x40;
@@ -57,7 +62,9 @@ public class KeycardCommandSet {
   static final byte SIGN_P1_PINLESS = 0x03;
 
   public static final byte SIGN_P2_ECDSA = 0x00;
-  public static final byte SIGN_P2_BLS12_381 = 0x01;
+  public static final byte SIGN_P2_EDDSA_ED25519 = 0x01;
+  public static final byte SIGN_P2_BLS12_381 = 0x02;
+  public static final byte SIGN_P2_BIP340_SCHNORR = 0x03;
 
   public static final byte STORE_DATA_P1_PUBLIC = 0x00;
   public static final byte STORE_DATA_P1_NDEF = 0x01;
@@ -87,17 +94,67 @@ public class KeycardCommandSet {
 
   static final byte TLV_APPLICATION_INFO_TEMPLATE = (byte) 0xA4;
 
+  /**
+   * Default Status CA public key (compressed secp256k1, 33 bytes).
+   */
+  public static final byte[] DEFAULT_CA_PUBLIC_KEY = {
+      (byte) 0x02,
+      (byte) 0x9a, (byte) 0xb9, (byte) 0x9e, (byte) 0xe1, (byte) 0xe7, (byte) 0xa7, (byte) 0x1b,
+      (byte) 0xdf, (byte) 0x45, (byte) 0xb3, (byte) 0xf9, (byte) 0xc5, (byte) 0x8c, (byte) 0x99,
+      (byte) 0x86, (byte) 0x6f, (byte) 0xf1, (byte) 0x29, (byte) 0x4d, (byte) 0x2c, (byte) 0x1e,
+      (byte) 0x30, (byte) 0x4e, (byte) 0x22, (byte) 0x8a, (byte) 0x86, (byte) 0xe1, (byte) 0x0c,
+      (byte) 0x33, (byte) 0x43, (byte) 0x50, (byte) 0x1c
+  };
+
   private final CardChannel apduChannel;
-  private SecureChannelSession secureChannel;
+  private SecureChannel secureChannel;
   private ApplicationInfo info;
+  private final List<byte[]> caPublicKeys;
+  private final List<byte[]> whitelistedCardPublicKeys;
 
   /**
-   * Creates a KeycardCommandSet using the given APDU Channel
+   * Creates a KeycardCommandSet using the given APDU Channel.
+   * The secure channel version (V1 or V2) is auto-detected based on the applet
+   * version after the first SELECT command.
+   * Uses the default Status CA public key for V2 certificate verification.
+   *
    * @param apduChannel APDU channel
    */
   public KeycardCommandSet(CardChannel apduChannel) {
+    this(apduChannel, DEFAULT_CA_PUBLIC_KEY);
+  }
+
+  /**
+   * Creates a KeycardCommandSet using the given APDU Channel and a single
+   * CA public key for V2 certificate verification.
+   *
+   * @param apduChannel APDU channel
+   * @param caPublicKey compressed secp256k1 CA public key (33 bytes)
+   */
+  public KeycardCommandSet(CardChannel apduChannel, byte[] caPublicKey) {
+    this(apduChannel, Collections.singletonList(caPublicKey), Collections.emptyList());
+  }
+
+  /**
+   * Creates a KeycardCommandSet using the given APDU Channel with the given
+   * set of trusted CA public keys and optionally whitelisted card identity
+   * public keys for V2 certificate verification.
+   *
+   * @param apduChannel APDU channel
+   * @param caPublicKeys array of compressed secp256k1 CA public keys (33 bytes each), may be empty but not null
+   * @param whitelistedCardPublicKeys array of compressed card identity public keys (33 bytes each), may be empty but not null
+   */
+  public KeycardCommandSet(CardChannel apduChannel, List<byte[]> caPublicKeys, List<byte[]> whitelistedCardPublicKeys) {
+    if (caPublicKeys == null) {
+      throw new IllegalArgumentException("caPublicKeys must not be null");
+    }
+    if (whitelistedCardPublicKeys == null) {
+      throw new IllegalArgumentException("whitelistedCardPublicKeys must not be null");
+    }
     this.apduChannel = apduChannel;
-    this.secureChannel = new SecureChannelSession();
+    this.caPublicKeys = caPublicKeys;
+    this.whitelistedCardPublicKeys = whitelistedCardPublicKeys;
+    this.secureChannel = new SecureChannelV2(caPublicKeys, whitelistedCardPublicKeys);
   }
 
   /**
@@ -111,11 +168,12 @@ public class KeycardCommandSet {
   }
 
   /**
-   * Set the SecureChannel object
-   * @param secureChannel secure channel
+   * Returns the current secure channel implementation.
+   *
+   * @return the secure channel
    */
-  protected void setSecureChannel(SecureChannelSession secureChannel) {
-    this.secureChannel = secureChannel;
+  public SecureChannel getSecureChannel() {
+    return secureChannel;
   }
 
   /**
@@ -156,13 +214,19 @@ public class KeycardCommandSet {
     APDUCommand selectApplet = new APDUCommand(0x00, 0xA4, 4, 0, Identifiers.getKeycardInstanceAID(instanceIdx));
     APDUResponse resp =  apduChannel.send(selectApplet);
 
-
     if (resp.getSw() == 0x9000) {
       info = new ApplicationInfo(resp.getData());
 
       if (info.hasSecureChannelCapability()) {
-        this.secureChannel.generateSecret(info.getSecureChannelPubKey());
-        this.secureChannel.reset();
+        if (isSecureChannelV2(info)) {
+          SecureChannelV2 scV2 = new SecureChannelV2(caPublicKeys, whitelistedCardPublicKeys);
+          scV2.setCardCertificate(info.getCertData());
+          this.secureChannel = scV2;
+        } else {
+          SecureChannelV1 scV1 = new SecureChannelV1();
+          scV1.generateSecret(info.getSecureChannelPubKey());
+          this.secureChannel = scV1;
+        }
       }
     }
 
@@ -427,6 +491,19 @@ public class KeycardCommandSet {
   }
 
   /**
+   * Sends a LOAD KEY APDU. The given seed is sent as-is and the P1 of the command is set to LOAD_KEY_P1_LEE (0x04).
+   * This works on cards which support public key derivation. The loaded keyset is extended and support further
+   * key derivation.
+   *
+   * @param seed the binary seed
+   * @return the raw card response
+   * @throws IOException communication error
+   */
+  public APDUResponse loadLEEKey(byte[] seed) throws IOException {
+    return loadKey(seed, LOAD_KEY_P1_LEE);
+  }  
+
+  /**
    * Sends a LOAD KEY APDU. The key is sent in TLV format, includes the public key and no chain code, meaning that
    * the card will not be able to do further key derivation.
    *
@@ -556,11 +633,26 @@ public class KeycardCommandSet {
    * @throws IOException communication error
    */
   public APDUResponse signWithPath(byte[] hash, String path, boolean makeCurrent) throws IOException {
+    return signWithPath(hash, path, SIGN_P2_ECDSA, makeCurrent);
+  }
+
+  /**
+   * Sends a SIGN APDU. This signs a precomputed hash that must be exactly 32-bytes long. The key used to sign is given
+   * as a parameter.
+   *
+   * @param hash the hash to sign
+   * @params path the path of the key to use
+   * @oarams algo the signing algorithm
+   * @param makeCurrent ture if the key used to sign should become the current key, false otherwise
+   * @return the raw card response
+   * @throws IOException communication error
+   */
+  public APDUResponse signWithPath(byte[] hash, String path, int algo, boolean makeCurrent) throws IOException {
     KeyPath keyPath = new KeyPath(path);
     byte[] pathData = keyPath.getData();
     byte[] data = Arrays.copyOf(hash, hash.length + pathData.length);
     System.arraycopy(pathData, 0, data, hash.length, pathData.length);
-    return sign(data, keyPath.getSource() | (makeCurrent ? SIGN_P1_DERIVE_AND_MAKE_CURRENT : SIGN_P1_DERIVE));
+    return sign(data, keyPath.getSource() | (makeCurrent ? SIGN_P1_DERIVE_AND_MAKE_CURRENT : SIGN_P1_DERIVE), algo);
   }
 
   /**
@@ -585,9 +677,14 @@ public class KeycardCommandSet {
    * @throws IOException communication error
    */
   public APDUResponse sign(byte[] data, int p1) throws IOException {
-    APDUCommand sign = secureChannel.protectedCommand(0x80, INS_SIGN, p1, 0x00, data);
+    return sign(data, p1, SIGN_P2_ECDSA);
+  }
+
+  public APDUResponse sign(byte[] data, int p1, int p2) throws IOException {
+    APDUCommand sign = secureChannel.protectedCommand(0x80, INS_SIGN, p1, p2, data);
     return secureChannel.transmit(apduChannel, sign);
   }
+
 
   /**
    * Sends a DERIVE KEY APDU with the given key path.
@@ -773,6 +870,31 @@ public class KeycardCommandSet {
   }  
 
   /**
+   * Sends an EXPORT LEE APDU.
+   *
+   * @param keypath the derivation path
+   * @return the raw card response
+   * @throws IOException communication error
+   */  
+  public APDUResponse exportLEEKey(String keyPath) throws IOException {
+    KeyPath path = new KeyPath(keyPath);
+    return exportLEEKey(path.getData(), path.getSource());
+  }
+
+  /**
+   * Sends an EXPORT LEE APDU.
+   *
+   * @param path the derivation path
+   * @param source the derivation source
+   * @return the raw card response
+   * @throws IOException communication error
+   */ 
+  public APDUResponse exportLEEKey(byte[] path, int source) throws IOException {
+    APDUCommand exportLee = secureChannel.protectedCommand(0x80, INS_EXPORT_LEE, source, 0, path);
+    return secureChannel.transmit(apduChannel, exportLee);
+  }
+
+  /**
    * Sends a GET DATA APDU.
    *
    * @param dataType the type of data to be stored
@@ -782,6 +904,11 @@ public class KeycardCommandSet {
   public APDUResponse getData(byte dataType) throws IOException {
     APDUCommand getData = secureChannel.protectedCommand(0x80, INS_GET_DATA, dataType, 0, new byte[0]);
     return secureChannel.transmit(apduChannel, getData);
+  }
+
+  public APDUResponse getChallenge(int len) throws IOException {
+    APDUCommand getChallenge = secureChannel.protectedCommand(0x80, INS_GET_CHALLENGE, len, 0, new byte[0]);
+    return secureChannel.transmit(apduChannel, getChallenge);
   }
 
   /**
@@ -860,7 +987,7 @@ public class KeycardCommandSet {
    * @return the raw card response
    * @throws IOException communication error
    */
-  public APDUResponse init(String pin, String puk, String pairingPassword) throws IOException {
+  public APDUResponse init(String pin, String puk, String pairingPassword) throws IOException, APDUException {
     return this.init(pin, puk, pairingPassword, (byte) 0, (byte) 0);
   }
 
@@ -875,7 +1002,7 @@ public class KeycardCommandSet {
    * @return the raw card response
    * @throws IOException communication error
    */
-  public APDUResponse init(String pin, String puk, String pairingPassword, byte pinRetries, byte pukRetries) throws IOException {
+  public APDUResponse init(String pin, String puk, String pairingPassword, byte pinRetries, byte pukRetries) throws IOException, APDUException {
     return this.init(pin, null, puk, pairingPasswordToSecret(pairingPassword), pinRetries, pukRetries);
   }
 
@@ -891,7 +1018,7 @@ public class KeycardCommandSet {
    * @return the raw card response
    * @throws IOException communication error
    */
-  public APDUResponse init(String pin, String altPin, String puk, String pairingPassword, byte pinRetries, byte pukRetries) throws IOException {
+  public APDUResponse init(String pin, String altPin, String puk, String pairingPassword, byte pinRetries, byte pukRetries) throws IOException, APDUException {
     return this.init(pin, altPin, puk, pairingPasswordToSecret(pairingPassword), pinRetries, pukRetries);
   }  
 
@@ -904,7 +1031,7 @@ public class KeycardCommandSet {
    * @return the raw card response
    * @throws IOException communication error
    */
-  public APDUResponse init(String pin, String puk, byte[] sharedSecret) throws IOException {
+  public APDUResponse init(String pin, String puk, byte[] sharedSecret) throws IOException, APDUException {
     return init(pin, null, puk, sharedSecret, (byte) 0, (byte) 0);
   }
 
@@ -912,15 +1039,16 @@ public class KeycardCommandSet {
    * Sends the INIT command to the card. If either pinRetries or pukRetries is zero, neither will be sent.
    *
    * @param pin the PIN
-   * @param pin the alternative
+   * @param altPin the alternative PIN (may be null)
    * @param puk the PUK
-   * @param sharedSecret the shared secret for pairing
+   * @param sharedSecret the shared secret for pairing (ignored for V2)
    * @param pinRetries the number of allowed PIN retries
    * @param pukRetries the number of allowed PUK retries
    * @return the raw card response
    * @throws IOException communication error
    */
-  public APDUResponse init(String pin, String altPin, String puk, byte[] sharedSecret, byte pinRetries, byte pukRetries) throws IOException {
+  public APDUResponse init(String pin, String altPin, String puk, byte[] sharedSecret, byte pinRetries, byte pukRetries) throws IOException, APDUException {
+    // Build init data: PIN + PUK [+ retries(2) [+ altPIN]]
     int baselen = pin.length() + puk.length() + sharedSecret.length;
     int extlen;
 
@@ -931,7 +1059,7 @@ public class KeycardCommandSet {
     } else {
       extlen = 0;
     }
-    
+
     byte[] initData = Arrays.copyOf(pin.getBytes(), baselen + extlen);
     System.arraycopy(puk.getBytes(), 0, initData, pin.length(), puk.length());
     System.arraycopy(sharedSecret, 0, initData, pin.length() + puk.length(), sharedSecret.length);
@@ -940,13 +1068,21 @@ public class KeycardCommandSet {
       initData[baselen] = pinRetries;
       initData[baselen + 1] = pukRetries;
 
-      if (extlen > 2) {
+      if (extlen > 2 && altPin != null) {
         System.arraycopy(altPin.getBytes(), 0, initData, baselen + 2, altPin.length());
       }
     }
 
-    APDUCommand init = new APDUCommand(0x80, INS_INIT, 0, 0, secureChannel.oneShotEncrypt(initData));
-    return apduChannel.send(init);
+    if (secureChannel instanceof SecureChannelV2) {
+      // V2: open secure channel first, then send INIT as a normal encrypted command
+      secureChannel.autoOpenSecureChannel(apduChannel);
+      APDUCommand initCmd = secureChannel.protectedCommand(0x80, INS_INIT, 0, 0, initData);
+      return secureChannel.transmit(apduChannel, initCmd);
+    } else {
+      // V1: use one-shot encryption with the static shared secret
+      APDUCommand initCmd = new APDUCommand(0x80, INS_INIT, 0, 0, ((SecureChannelV1) secureChannel).oneShotEncrypt(initData));
+      return apduChannel.send(initCmd);
+    }
   }
   
   /**
@@ -958,5 +1094,15 @@ public class KeycardCommandSet {
   public APDUResponse factoryReset() throws IOException {
     APDUCommand factoryReset = new APDUCommand(0x80, INS_FACTORY_RESET, FACTORY_RESET_P1_MAGIC, FACTORY_RESET_P2_MAGIC, new byte[0]);
     return apduChannel.send(factoryReset);
-  }  
+  }
+
+  /**
+   * Returns true if the applet uses Secure Channel V2 (app version >= 4.0).
+   *
+   * @param appInfo the application info from SELECT
+   * @return true for Secure Channel V2, false for V1
+   */
+  private boolean isSecureChannelV2(ApplicationInfo appInfo) {
+    return appInfo.getAppVersion() >= 0x0400;
+  }
 }

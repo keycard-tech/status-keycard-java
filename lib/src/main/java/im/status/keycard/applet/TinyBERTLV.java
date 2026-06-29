@@ -148,6 +148,21 @@ public class TinyBERTLV {
   }
 
   /**
+   * Checks the next tag. The current implementation only reads tags on one byte. Can be extended if needed.
+   *
+   * @return the tag
+   */
+  public boolean nextTagIs(int expectedTag) {
+    int nextTag = readTag();
+    
+    if (nextTag != END_OF_TLV) {
+      unreadLastTag();
+    }
+
+    return nextTag == expectedTag;
+  }
+
+  /**
    * Reads the next tag. The current implementation only reads length on one and two bytes. Can be extended if needed.
    *
    * @return the tag

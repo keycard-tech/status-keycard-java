@@ -12,12 +12,15 @@ public class ApplicationInfo {
   private byte freePairingSlots;
   private byte[] keyUID;
   private byte capabilities;
+  private byte[] certData;
+  private byte appStatus;
 
   public static final byte TLV_APPLICATION_INFO_TEMPLATE = (byte) 0xA4;
   public static final byte TLV_PUB_KEY = (byte) 0x80;
   public static final byte TLV_UID = (byte) 0x8F;
   public static final byte TLV_KEY_UID = (byte) 0x8E;
   public static final byte TLV_CAPABILITIES = (byte) 0x8D;
+  public static final byte TLV_STATUS = (byte) 0x8C;
 
   static final byte CAPABILITY_SECURE_CHANNEL = (byte) 0x01;
   static final byte CAPABILITY_KEY_MANAGEMENT = (byte) 0x02;
@@ -26,6 +29,9 @@ public class ApplicationInfo {
   static final byte CAPABILITY_FACTORY_RESET = (byte) 0x10;
 
   static final byte CAPABILITIES_ALL = CAPABILITY_SECURE_CHANNEL | CAPABILITY_KEY_MANAGEMENT | CAPABILITY_CREDENTIALS_MANAGEMENT | CAPABILITY_NDEF | CAPABILITY_FACTORY_RESET;
+
+  static final byte APP_STATUS_INITIALIZED = 0x10;
+  static final byte APP_STATUS_LEE_MODE = 0x20;
 
   /**
    * Constructs an object by parsing the TLV data.
@@ -36,10 +42,7 @@ public class ApplicationInfo {
   public ApplicationInfo(byte[] tlvData) throws IllegalArgumentException {
     TinyBERTLV tlv = new TinyBERTLV(tlvData);
 
-    int topTag = tlv.readTag();
-    tlv.unreadLastTag();
-
-    if (topTag == TLV_PUB_KEY) {
+    if (tlv.nextTagIs(TLV_PUB_KEY)) {
       secureChannelPubKey = tlv.readPrimitive(TLV_PUB_KEY);
       initializedCard = false;
       capabilities = CAPABILITY_CREDENTIALS_MANAGEMENT;
@@ -52,20 +55,50 @@ public class ApplicationInfo {
     }
 
     tlv.enterConstructed(TLV_APPLICATION_INFO_TEMPLATE);
-    instanceUID = tlv.readPrimitive(TLV_UID);
-    secureChannelPubKey = tlv.readPrimitive(TLV_PUB_KEY);
+
+    // Parse fields conditionally by tag for cross-version compatibility.
+
+    // instanceUID (0x8F) - present in V1-V3, absent in V4+
+    if (tlv.nextTagIs(TLV_UID)) {
+      instanceUID = tlv.readPrimitive(TLV_UID);
+    }
+
+    // secureChannelPubKey (0x80) - present in V1-V3, absent in V4+
+    if (tlv.nextTagIs(TLV_PUB_KEY)) {
+      secureChannelPubKey = tlv.readPrimitive(TLV_PUB_KEY);
+    }
+
+    // appVersion (INTEGER 0x02) - present in all versions
     appVersion = (short) tlv.readInt();
-    freePairingSlots = (byte) tlv.readInt();
+
+    // appStatud (0x8C) - initialized, lee mode, pin retries
+    if (tlv.nextTagIs(TLV_STATUS)) {
+      appStatus = tlv.readPrimitive(TLV_STATUS)[0];
+      initializedCard = (appStatus & APP_STATUS_INITIALIZED) == APP_STATUS_INITIALIZED;
+    } else {
+      appStatus = APP_STATUS_INITIALIZED;
+      initializedCard = true;
+    }
+
+    // freePairingSlots (INTEGER 0x02) - present in V1-V3, absent in V4+
+    if (tlv.nextTagIs(TinyBERTLV.TLV_INT)) {
+      freePairingSlots = (byte) tlv.readInt();
+    }
+
+    // keyUID (0x8E) - present in all versions
     keyUID = tlv.readPrimitive(TLV_KEY_UID);
 
-    if (tlv.readTag() != TinyBERTLV.END_OF_TLV) {
-      tlv.unreadLastTag();
+    // capabilities (0x8D) - present in V2+
+    if (tlv.nextTagIs(TLV_CAPABILITIES)) {
       capabilities = tlv.readPrimitive(TLV_CAPABILITIES)[0];
     } else {
       capabilities = CAPABILITIES_ALL;
     }
 
-    initializedCard = true;
+    // Parse certificate - present in V4+
+    if (tlv.nextTagIs(Certificate.TLV_CERT)) {
+      certData = tlv.readPrimitive(Certificate.TLV_CERT);
+    }
   }
 
   /**
@@ -200,5 +233,40 @@ public class ApplicationInfo {
    */
   public boolean hasFactoryResetCapability() {
     return (capabilities & CAPABILITY_FACTORY_RESET) == CAPABILITY_FACTORY_RESET;
-  }  
+  }
+
+  /**
+   * Returns true if the device has loaded LEE keys.
+   *
+   * @return true or false
+   */
+  public boolean isLEEMode() {
+    return (appStatus & APP_STATUS_LEE_MODE) == APP_STATUS_LEE_MODE;
+  }
+
+  /**
+   * Returns the number of remaining PIN retries. 
+   * Only available on applet V4+, returns -1 on older cards.
+   *
+   * @return pin retry counter
+   */
+  public byte getPINRetries() {
+    if (appVersion < 0x0400) {
+      return -1;
+    }
+
+    return (byte) (appStatus & 0x0f);
+  }
+
+  /**
+   * Returns the raw identity certificate data (V2 only).
+   *
+   * This is the 98-byte certificate: compressed_pubkey(33) || r(32) || s(32) || v(1).
+   * Used by {@link SecureChannelV2} for card authentication during handshake.
+   *
+   * @return the certificate data, or null if not present (V1 cards)
+   */
+  public byte[] getCertData() {
+    return certData;
+  }
 }

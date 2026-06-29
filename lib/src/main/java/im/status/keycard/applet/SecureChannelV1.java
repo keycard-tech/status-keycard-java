@@ -21,9 +21,14 @@ import java.security.*;
 import java.util.Arrays;
 
 /**
- * Handles a SecureChannel session with the card.
+ * Handles a SecureChannel V1 session with the card.
+ *
+ * Uses AES-128-CBC with CMAC for encryption and authentication,
+ * with pairing-based key derivation via ECDH on secp256k1.
+ *
+ * Implements the {@link SecureChannel} interface for interoperability with V2.
  */
-public class SecureChannelSession {
+public class SecureChannelV1 implements SecureChannel {
   public static final short SC_SECRET_LENGTH = 32;
   public static final short SC_BLOCK_SIZE = 16;
 
@@ -54,7 +59,7 @@ public class SecureChannelSession {
   /**
    * Constructs a SecureChannel session on the client.
    */
-  public SecureChannelSession() {
+  public SecureChannelV1() {
       random = new SecureRandom();
       open = false;
   }
