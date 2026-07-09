@@ -36,6 +36,7 @@ public class KeycardCommandSet {
   static final byte INS_SET_PINLESS_PATH = (byte) 0xC1;
   static final byte INS_EXPORT_KEY = (byte) 0xC2;
   static final byte INS_EXPORT_LEE = (byte) 0xC3;
+  static final byte INS_EXPORT_BIP85 = (byte) 0xC4;
   static final byte INS_GET_DATA = (byte) 0xCA;
   static final byte INS_STORE_DATA = (byte) 0xE2;
   static final byte INS_GET_CHALLENGE = (byte) 0x84;
@@ -892,6 +893,32 @@ public class KeycardCommandSet {
   public APDUResponse exportLEEKey(byte[] path, int source) throws IOException {
     APDUCommand exportLee = secureChannel.protectedCommand(0x80, INS_EXPORT_LEE, source, 0, path);
     return secureChannel.transmit(apduChannel, exportLee);
+  }
+
+  /**
+   * Exports derived secret material from the BIP85 subtree.
+   * 
+   * @param path the BIP85 derivation path
+   * @param len the length of the data to export (1 <= len <= 64)
+   * @return
+   * @throws IOException
+   */
+  public APDUResponse exportBIP85(String keyPath, int len) throws IOException {
+    KeyPath path = new KeyPath(keyPath);
+    return exportBIP85(len, path.getData());
+  }
+
+  /**
+   * Exports derived secret material from the BIP85 subtree.
+   * 
+   * @param p1 length of desired output
+   * @param data the derivation path
+   * @return
+   * @throws IOException
+   */
+  public APDUResponse exportBIP85(int p1, byte[] data) throws IOException {
+    APDUCommand exportBIP85 = secureChannel.protectedCommand(0x80, INS_EXPORT_BIP85, p1, 0, data);
+    return secureChannel.transmit(apduChannel, exportBIP85);
   }
 
   /**
