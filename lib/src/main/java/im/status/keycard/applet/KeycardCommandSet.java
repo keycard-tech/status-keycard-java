@@ -37,6 +37,7 @@ public class KeycardCommandSet {
   static final byte INS_EXPORT_KEY = (byte) 0xC2;
   static final byte INS_EXPORT_LEE = (byte) 0xC3;
   static final byte INS_EXPORT_BIP85 = (byte) 0xC4;
+  static final byte INS_ECDH = (byte) 0xC5;
   static final byte INS_GET_DATA = (byte) 0xCA;
   static final byte INS_STORE_DATA = (byte) 0xE2;
   static final byte INS_GET_CHALLENGE = (byte) 0x84;
@@ -66,6 +67,8 @@ public class KeycardCommandSet {
   public static final byte SIGN_P2_EDDSA_ED25519 = 0x01;
   public static final byte SIGN_P2_BLS12_381 = 0x02;
   public static final byte SIGN_P2_BIP340_SCHNORR = 0x03;
+
+  public static final byte ECDH_P2_RAW_SECRET = 0x00;
 
   public static final byte STORE_DATA_P1_PUBLIC = 0x00;
   public static final byte STORE_DATA_P1_NDEF = 0x01;
@@ -649,10 +652,45 @@ public class KeycardCommandSet {
    * @throws IOException communication error
    */
   public APDUResponse signWithPath(byte[] hash, String path, int algo, boolean makeCurrent) throws IOException {
+    return signWithPath(hash, path, algo, makeCurrent, null);
+  }
+
+  /**
+   * Sends a SIGN APDU. This signs a precomputed hash that must be exactly 32-bytes long. The key used to sign is given
+   * as a parameter. For BIP-340 Schnorr signing an optional 32-byte tweak may be provided; when omitted an all-zero
+   * tweak is used.
+   *
+   * @param hash the hash to sign
+   * @params path the path of the key to use
+   * @oarams algo the signing algorithm
+   * @param makeCurrent ture if the key used to sign should become the current key, false otherwise
+   * @param tweak optional 32-byte tweak (only used for Schnorr, may be null)
+   * @return the raw card response
+   * @throws IOException communication error
+   */
+  public APDUResponse signWithPath(byte[] hash, String path, int algo, boolean makeCurrent, byte[] tweak) throws IOException {
     KeyPath keyPath = new KeyPath(path);
     byte[] pathData = keyPath.getData();
-    byte[] data = Arrays.copyOf(hash, hash.length + pathData.length);
-    System.arraycopy(pathData, 0, data, hash.length, pathData.length);
+    byte[] data;
+
+    if (algo == SIGN_P2_BIP340_SCHNORR) {
+      // Schnorr expects: hash (32) + tweak (32) + path. An absent tweak is treated as all-zero.
+      byte[] effectiveTweak = tweak;
+      if (effectiveTweak == null) {
+        effectiveTweak = new byte[32];
+      } else if (effectiveTweak.length != 32) {
+        throw new IllegalArgumentException("Schnorr tweak must be exactly 32 bytes");
+      }
+
+      int signDataLen = hash.length + effectiveTweak.length;
+      data = new byte[signDataLen + pathData.length];
+      System.arraycopy(hash, 0, data, 0, hash.length);
+      System.arraycopy(effectiveTweak, 0, data, hash.length, effectiveTweak.length);
+      System.arraycopy(pathData, 0, data, signDataLen, pathData.length);
+    } else {
+      data = Arrays.copyOf(hash, hash.length + pathData.length);
+      System.arraycopy(pathData, 0, data, hash.length, pathData.length);
+    }
     return sign(data, keyPath.getSource() | (makeCurrent ? SIGN_P1_DERIVE_AND_MAKE_CURRENT : SIGN_P1_DERIVE), algo);
   }
 
@@ -922,6 +960,33 @@ public class KeycardCommandSet {
   }
 
   /**
+   * Sends an ECDH APDU. Computes an EC-DH key agreement between the key derived at the given path and the given peer
+   * public key, returning the x-coordinate of the resulting point (32 bytes). The data field must contain the peer
+   * public key as an uncompressed point (0x04 || X || Y, 65 bytes) followed by the derivation path.
+   *
+   * @param p1 the P1 parameter (must be SIGN_P1_DERIVE)
+   * @param p2 the P2 parameter (must be ECDH_P2_RAW_SECRET)
+   * @param data the peer public key followed by the derivation path
+   * @return the raw card response
+   * @throws IOException communication error
+   */
+  public APDUResponse ecdh(int p1, int p2, byte[] data) throws IOException {
+    APDUCommand ecdh = secureChannel.protectedCommand(0x80, INS_ECDH, p1, p2, data);
+    return secureChannel.transmit(apduChannel, ecdh);
+  }
+
+  /**
+   * Sends an ECDH APDU using the default P1/P2 parameters (SIGN_P1_DERIVE and ECDH_P2_RAW_SECRET).
+   *
+   * @param data the peer public key followed by the derivation path
+   * @return the raw card response
+   * @throws IOException communication error
+   */
+  public APDUResponse ecdh(byte[] data) throws IOException {
+    return ecdh(SIGN_P1_DERIVE, ECDH_P2_RAW_SECRET, data);
+  }
+
+  /**
    * Sends a GET DATA APDU.
    *
    * @param dataType the type of data to be stored
@@ -929,8 +994,63 @@ public class KeycardCommandSet {
    * @throws IOException communication error
    */
   public APDUResponse getData(byte dataType) throws IOException {
-    APDUCommand getData = secureChannel.protectedCommand(0x80, INS_GET_DATA, dataType, 0, new byte[0]);
+    return getData(dataType, 0);
+  }
+
+  /**
+   * Sends a GET DATA APDU with an explicit byte offset. The offset must be a multiple of 4, since the card encodes
+   * it in the P2 parameter as a 4-byte-unit value. This is only meaningful for the NDEF data type, which may be
+   * segmented across multiple responses.
+   *
+   * @param dataType the type of data to be stored
+   * @param offset the byte offset into the stored data (must be a multiple of 4)
+   * @return the raw card response
+   * @throws IOException communication error
+   */
+  public APDUResponse getData(byte dataType, int offset) throws IOException {
+    if (offset % 4 != 0) {
+      throw new IllegalArgumentException("Offset must be a multiple of 4");
+    }
+    APDUCommand getData = secureChannel.protectedCommand(0x80, INS_GET_DATA, dataType, (byte) (offset / 4), new byte[0]);
     return secureChannel.transmit(apduChannel, getData);
+  }
+
+  /**
+   * Retrieves the full NDEF record stored on the card, transparently handling the segmentation that the card
+   * performs on large records. The returned data includes the 2-byte big-endian payload length header.
+   *
+   * @return the full NDEF record (length header + payload)
+   * @throws IOException communication error
+   */
+  public byte[] getNDEF() throws IOException {
+    APDUResponse resp = getData(STORE_DATA_P1_NDEF, 0);
+    if (resp.getSw() != 0x9000) {
+      throw new IOException("GET DATA (NDEF) failed with SW 0x" + String.format("%04X", resp.getSw()));
+    }
+
+    byte[] firstChunk = resp.getData();
+    if (firstChunk.length < 2) {
+      throw new IOException("NDEF response too short to contain the length header");
+    }
+
+    int totalLen = ((firstChunk[0] & 0xFF) << 8) | (firstChunk[1] & 0xFF);
+    totalLen += 2; // include the length header itself
+
+    byte[] ndef = new byte[totalLen];
+    System.arraycopy(firstChunk, 0, ndef, 0, firstChunk.length);
+
+    int off = firstChunk.length;
+    while (off < totalLen) {
+      resp = getData(STORE_DATA_P1_NDEF, off);
+      if (resp.getSw() != 0x9000) {
+        throw new IOException("GET DATA (NDEF) failed with SW 0x" + String.format("%04X", resp.getSw()));
+      }
+      byte[] chunk = resp.getData();
+      System.arraycopy(chunk, 0, ndef, off, chunk.length);
+      off += chunk.length;
+    }
+
+    return ndef;
   }
 
   public APDUResponse getChallenge(int len) throws IOException {
